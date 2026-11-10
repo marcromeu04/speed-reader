@@ -33,6 +33,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [status, setStatus] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [lightbox, setLightbox] = useState(null); // url de imagen ampliada
 
   // estadísticas de lectura
   const [elapsed, setElapsed] = useState(0); // ms acumulados reproduciendo
@@ -74,7 +75,9 @@ export default function App() {
   // ---- persistencia ----
   useEffect(() => saveSettings(settings), [settings]);
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
-  useEffect(() => saveLibrary(library), [library]);
+  // Al persistir, quitamos las imágenes (base64 pesado) para no llenar la cuota;
+  // se regeneran al volver a cargar el PDF.
+  useEffect(() => saveLibrary(library.map((d) => ({ ...d, images: undefined }))), [library]);
 
   // guarda la posición en el documento activo (con rebote)
   useEffect(() => {
@@ -163,7 +166,7 @@ export default function App() {
     const isMd = /\.(md|markdown)$/i.test(file.name);
     const isPdf = /\.pdf$/i.test(file.name);
     try {
-      let cleaned;
+      let cleaned, images = [];
       if (isPdf) {
         const buf = await file.arrayBuffer();
         const res = await fetch('/api/parse-pdf', {
@@ -172,7 +175,9 @@ export default function App() {
           body: buf,
         });
         if (!res.ok) throw new Error('pdf');
-        cleaned = (await res.json()).text;
+        const data = await res.json();
+        cleaned = data.text;
+        images = data.images || [];
       } else {
         const raw = await file.text();
         const res = await fetch('/api/parse', {
@@ -182,16 +187,23 @@ export default function App() {
         });
         cleaned = (await res.json()).text;
       }
-      const doc = { id: makeId(), name: file.name, text: cleaned, pos: 0, addedAt: Date.now() };
+      const doc = { id: makeId(), name: file.name, text: cleaned, pos: 0, addedAt: Date.now(), images };
       setLibrary((lib) => [doc, ...lib.filter((d) => d.id !== 'sample' || lib.length === 1)]);
       setActiveId(doc.id);
-      setStatus(`✓ ${file.name} · ${cleaned.length.toLocaleString('es')} caracteres`);
+      const imgNote = images.length ? ` · ${images.length} imagen${images.length > 1 ? 'es' : ''}` : '';
+      setStatus(`✓ ${file.name} · ${cleaned.length.toLocaleString('es')} caracteres${imgNote}`);
     } catch {
       setStatus('⚠ No se pudo procesar ' + file.name);
     }
   }, []);
 
   const onFile = (e) => { const f = e.target.files?.[0]; if (f) ingest(f); e.target.value = ''; };
+
+  // ?demo=1 carga el PDF de ejemplo al abrir (práctico para demostraciones).
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('demo')) loadExamplePdf();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Carga el PDF de ejemplo incluido (client/public/ejemplo.pdf).
   const loadExamplePdf = useCallback(async () => {
@@ -399,7 +411,20 @@ export default function App() {
       </main>
 
       {settings.showSheet && !focus && (
-        <Sheet paragraphs={paragraphs} index={index} currentPara={currentPara} />
+        <Sheet
+          paragraphs={paragraphs}
+          index={index}
+          currentPara={currentPara}
+          images={activeDoc?.images || []}
+          onOpenImage={setLightbox}
+        />
+      )}
+
+      {lightbox && (
+        <div className="lightbox" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="Imagen del documento" onClick={(e) => e.stopPropagation()} />
+          <button className="lb-close" onClick={() => setLightbox(null)}>✕</button>
+        </div>
       )}
 
       {/* ---------------- Ayuda ---------------- */}

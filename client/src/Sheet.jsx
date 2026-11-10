@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 
 // "Hoja": muestra el documento como texto corrido, resalta el párrafo actual y
 // subraya la palabra que se está leyendo, desplazándose automáticamente.
-export default function Sheet({ paragraphs, index, currentPara }) {
+export default function Sheet({ paragraphs, index, currentPara, images = [], onOpenImage }) {
   const activeRef = useRef(null);
   const boxRef = useRef(null);
 
@@ -23,6 +23,18 @@ export default function Sheet({ paragraphs, index, currentPara }) {
         <span className="sheet-para">Párrafo {currentPara + 1} / {paragraphs.length}</span>
       </div>
       <div className="sheet-page" ref={boxRef}>
+        {images.length > 0 && (
+          <div className="sheet-images">
+            <div className="imgs-title">🖼 Imágenes del documento · {images.length}</div>
+            <div className="imgs-grid">
+              {images.map((src, i) => (
+                <button key={i} className="thumb" onClick={() => onOpenImage(src)} title="Ver imagen">
+                  <img src={src} alt={`Imagen ${i + 1}`} />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {paragraphs.map((para, pi) => (
           <p key={pi} className={pi === currentPara ? 'p-active' : 'p-idle'}>
             {para.map((tok) => {

@@ -5,7 +5,40 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { execFile } = require('child_process');
 const express = require('express');
+
+// Extrae las imágenes embebidas de un PDF con `pdfimages` (poppler-utils).
+// Devuelve un array de data URLs PNG. Si la herramienta no está, devuelve [].
+function extractImages(pdfBuffer) {
+  return new Promise((resolve) => {
+    let dir;
+    try {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-pdf-'));
+      const pdfPath = path.join(dir, 'in.pdf');
+      fs.writeFileSync(pdfPath, pdfBuffer);
+      execFile('pdfimages', ['-png', pdfPath, path.join(dir, 'img')], { timeout: 20000 }, () => {
+        const images = [];
+        try {
+          for (const f of fs.readdirSync(dir).sort()) {
+            if (!/\.png$/i.test(f)) continue;
+            const b = fs.readFileSync(path.join(dir, f));
+            if (b.length < 2000) continue;        // descarta máscaras diminutas
+            if (b.length > 4_000_000) continue;    // y las enormes
+            images.push('data:image/png;base64,' + b.toString('base64'));
+            if (images.length >= 24) break;
+          }
+        } catch { /* nada */ }
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+        resolve(images);
+      });
+    } catch {
+      if (dir) try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      resolve([]);
+    }
+  });
+}
 
 let pdfParse = null;
 try { pdfParse = require('pdf-parse'); } catch { /* opcional */ }
@@ -106,7 +139,8 @@ app.post('/api/parse-pdf', async (req, res) => {
     text = text.replace(/(\p{L})-\n(\p{L})/gu, '$1$2');
     text = text.replace(/([^\n])\n(?!\n)/g, '$1 ');
     text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-    res.json({ text, pages: data.numpages, chars: text.length });
+    const images = await extractImages(req.body);
+    res.json({ text, pages: data.numpages, chars: text.length, images });
   } catch (e) {
     res.status(422).json({ error: 'No se pudo leer el PDF' });
   }
